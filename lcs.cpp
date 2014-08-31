@@ -12,7 +12,7 @@ Last Update		:		December 22nd, 2012
 
 ////////////////////////////////////////////////
 lcs::Frame::Frame(double timePoint, const char *dataFile) {
-	// vtkUnstructuredGridReader *reader = vtkUnstructuredGridReader::New();
+	//vtkUnstructuredGridReader *reader = vtkUnstructuredGridReader::New();
 	vtkXMLUnstructuredGridReader *reader = vtkXMLUnstructuredGridReader::New();
 	reader->SetFileName(dataFile);
 	reader->Update();

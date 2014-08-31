@@ -27,6 +27,7 @@ __constant__ int *numOfTetWalks;
 __constant__ void *pointers[25];
 __constant__ double timeStep, epsilon;
 
+__constant__ double interval;
 __constant__ double finalTime;
 
 __constant__ int sharedMemorySize, multiple;
@@ -181,7 +182,7 @@ __global__ void BlockedTracingKernelOfRK4(/*double *globalVertexPositions,
 
 					int *exitCells,
 */
-					double startTime, double endTime, double timeStep, double epsilon //, int sharedMemorySize, int multiple*/
+					double startTime, double endTime/*, double timeStep, double epsilon*/ //, int sharedMemorySize, int multiple*/
 					) {
 /*
 	cudaError_t err = cudaMemcpyToSymbol(pointers, &globalVertexPositions, sizeOfPointer, 0, cudaMemcpyHostToDevice) |
@@ -535,7 +536,7 @@ __global__ void BlockedTracingKernelOfRK4(/*double *globalVertexPositions,
 				case 3: alpha /*exactTime*/ += /*doubleValues[2]*/timeStep; break;
 				}
 
-				/*double*/ alpha = (/*doubleValues[1]*/endTime - alpha/*exactTime*/) / (/*doubleValues[1]*/endTime - /*doubleValues[0]*/startTime);
+				/*double*/ alpha = (/*doubleValues[1]*/startTime + interval - alpha/*exactTime*/) / interval; // (/*doubleValues[1]*/endTime - /*doubleValues[0]*/startTime);
 				/*double*/ beta = 1.0 - alpha;
 
 				/*double vecX[4], vecY[4], vecZ[4];*/
@@ -635,7 +636,7 @@ void InitializeConstantsForBlockedTracingKernelOfRK4(double *globalVertexPositio
 
 			int *exitCells,
 
-			double hostTimeStep, double hostEpsilon, double hostFinalTime
+			double hostTimeStep, double hostEpsilon, double hostFinalTime, double hostInterval
 
 #ifdef TET_WALK_STAT
 			, int *deviceNumOfTetWalks
@@ -671,7 +672,8 @@ void InitializeConstantsForBlockedTracingKernelOfRK4(double *globalVertexPositio
 			  cudaMemcpyToSymbol(pointers, &exitCells, sizeOfPointer, sizeOfPointer * 24, cudaMemcpyHostToDevice) |
 			  cudaMemcpyToSymbol(timeStep, &hostTimeStep, sizeof(double), 0, cudaMemcpyHostToDevice) |
 			  cudaMemcpyToSymbol(epsilon, &hostEpsilon, sizeof(double), 0, cudaMemcpyHostToDevice) |
-			  cudaMemcpyToSymbol(finalTime, &hostFinalTime, sizeof(double), 0, cudaMemcpyHostToDevice));
+			  cudaMemcpyToSymbol(finalTime, &hostFinalTime, sizeof(double), 0, cudaMemcpyHostToDevice) |
+			  cudaMemcpyToSymbol(interval, &hostInterval, sizeof(double), 0, cudaMemcpyHostToDevice));
 
 #ifdef TET_WALK_STAT
 	err = (cudaError_t)((int)err | cudaMemcpyToSymbol(numOfTetWalks, &deviceNumOfTetWalks, sizeOfPointer, 0, cudaMemcpyHostToDevice));
@@ -725,7 +727,7 @@ void BlockedTracingOfRK4(/*double *globalVertexPositions,
 
 			int *exitCells,*/
 
-			double startTime, double endTime, double timeStep, double epsilon, int numOfActiveBlocks,
+			double startTime, double endTime, /*double timeStep, double epsilon,*/ int numOfActiveBlocks,
 
 			int blockSize, int __sharedMemorySize, int __multiple) {
 	dim3 dimBlock(blockSize, 1, 1);
@@ -780,7 +782,7 @@ void BlockedTracingOfRK4(/*double *globalVertexPositions,
 
 					exitCells,
 */
-					startTime, endTime, timeStep, epsilon //, sharedMemorySize, multiple
+					startTime, endTime/*, timeStep, epsilon*/ //, sharedMemorySize, multiple
 					);
 
 	cudaError_t err = cudaDeviceSynchronize();

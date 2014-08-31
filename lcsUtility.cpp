@@ -9,8 +9,18 @@ Last Update	:	March 24th, 2013
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
+
+#ifdef IN_VC
+
 #include <time.h>
 #include <windows.h>
+
+#else
+
+#include <sys/time.h>
+
+#endif
+
 #include <vector>
 #include <algorithm>
 
@@ -29,6 +39,8 @@ void lcs::ConsumeChar(char goal, FILE *fin) {
 bool lcs::IsFloatChar(char ch) {
 	return isdigit(ch) || ch == '.' || ch == '-' || ch == '+';
 }
+
+#ifdef IN_VC
 
 // Copy from http://social.msdn.microsoft.com/Forums/vstudio/en-US/430449b3-f6dd-4e18-84de-eebd26a8d668/gettimeofday?forum=vcgeneral
 #if defined(_MSC_VER) || defined(_MSC_EXTENSIONS)
@@ -71,6 +83,8 @@ int gettimeofday(struct timeval *tv, struct timezone *tz)
  */
   return 0;
 }
+
+#endif
 
 double lcs::GetCurrentTimeInSeconds() {
 	timeval currTime;

@@ -49,13 +49,13 @@ extern "C" void InitializeConstantsForBlockedTracingKernelOfRK4(double *globalVe
 								int *blockOfGroups, int *offsetInBlocks, int *stage, double *lastPosition,
 								double *k, double *nx,
 								double *pastTimes, double *placesOfInterest, int *startOffsetInParticle, int *blockedActiveParticleIDList,
-								int *cellLocations, int *exitCells, double hostTimeStep, double hostEpsilon, double hostFinalTime
+								int *cellLocations, int *exitCells, double hostTimeStep, double hostEpsilon, double hostFinalTime, double hostInterval
 #ifdef TET_WALK_STAT
 								, int *numOfTetWalks
 #endif
 );
 
-extern "C" void BlockedTracingOfRK4(double startTime, double endTime, double timeStep, double epsilon, int numOfActiveBlocks, int blockSize, int sharedMemorySize, int multiple);
+extern "C" void BlockedTracingOfRK4(double startTime, double endTime, /*double timeStep, double epsilon,*/ int numOfActiveBlocks, int blockSize, int sharedMemorySize, int multiple);
 
 extern "C" void GetNumOfGroupsForBlocks(int *startOffsetInParticles, int *numOfGroupsForBlocks, int numOfActiveBlocks, int groupSize);
 
@@ -105,6 +105,7 @@ extern "C" void BigBlockInitializationForVelocities(double *globalStartVelocitie
 //const char *configurationFile = "RungeKutta4ForUpperVasc.conf";
 //const char *configurationFile = "RungeKutta4ForAR2.conf";
 const char *configurationFile = "RungeKutta4ForPatient96.conf";
+//const char *configurationFile = "RungeKutta4ForDoubleGyre3D.conf";
 const char *lastPositionFile = "lcsLastPositions.txt";
 const char *FTLEFile = "lcsFTLEValues.vtk";
 
@@ -140,6 +141,8 @@ int *startOffsetInCell, *startOffsetInPoint;
 int *initialCellLocations;
 
 // For tracing
+double globalStartTime, globalFinishTime;
+
 lcs::ParticleRecord **particleRecords;
 int *exitCells;
 int numOfInitialActiveParticles;
@@ -1083,8 +1086,15 @@ void InitializeParticleRecordsInDevice() {
 	err = cudaMalloc(&d_pastTimes, sizeof(double) * numOfInitialActiveParticles);
 	if (err) lcs::Error("Fail to create a buffer for device pastTimes");
 
-	err = cudaMemset(d_pastTimes, 0, sizeof(double) * numOfInitialActiveParticles);
-	if (err) lcs::Error("Fail to clear d_pastTimes");
+	double *pastTimes = new double[numOfInitialActiveParticles];
+	for (int i = 0; i < numOfInitialActiveParticles; i++) {
+		pastTimes[i] = globalStartTime;
+	}
+
+	err = cudaMemcpy(d_pastTimes, pastTimes, sizeof(double) * numOfInitialActiveParticles, cudaMemcpyHostToDevice);
+	if (err) lcs::Error("Fail to initialize d_pastTimes");
+
+	delete [] pastTimes;
 
 	// Initialize some integration-specific device arrays
 	switch (lcs::ParticleRecord::GetDataType()) {
@@ -1152,6 +1162,9 @@ double kernelSum;
 double kernelSumInInterval;
 
 void LaunchBlockedTracingKernel(int numOfWorkGroups, double beginTime, double finishTime, int blockSize, int sharedMemorySize, int multiple) {
+	/// DEBUG ///
+	// printf("GPU launch: %lf -> %lf (%lf)\n", beginTime, finishTime, finishTime - beginTime);
+
 	//printf("Start to use GPU to process blocked tracing ...\n");
 	//printf("\n");
 
@@ -1162,7 +1175,7 @@ void LaunchBlockedTracingKernel(int numOfWorkGroups, double beginTime, double fi
 				d_localConnectivities, d_localLinks, d_globalCellIDs, d_activeBlocks, // Map active block ID to interesting block ID
 				d_blockOfGroups, d_offsetInBlocks, d_stages, d_lastPositionForRK4, d_k1ForRK4, d_k2ForRK4, d_k3ForRK4, d_pastTimes, d_placesOfInterest,
 				d_startOffsetInParticles, d_blockedActiveParticles, d_localTetIDs, d_exitCells,*/
-				beginTime, finishTime, configure->GetTimeStep(), configure->GetEpsilon(), numOfWorkGroups, blockSize, sharedMemorySize, multiple);
+				beginTime, finishTime, /*configure->GetTimeStep(), configure->GetEpsilon(),*/ numOfWorkGroups, blockSize, sharedMemorySize, multiple);
 
 	double endTime = lcs::GetCurrentTimeInSeconds();
 
@@ -1234,13 +1247,13 @@ void InitializeInitialActiveParticles() {
 	InitializeParticleRecordsInDevice();
 }
 
-void InitializeVelocityData(double **velocities) {
+void InitializeVelocityData(double **velocities, int startFrame) {
 	// Initialize velocity data
 	for (int i = 0; i < 2; i++)
 		velocities[i] = new double [globalNumOfPoints * 3];
 
-	// Read velocities[0]
-	frames[0]->GetTetrahedralGrid()->ReadVelocities(velocities[0]);
+	// Read velocities[startFrame]
+	frames[startFrame]->GetTetrahedralGrid()->ReadVelocities(velocities[0]);
 	
 	// Create d_velocities[2]
 	for (int i = 0; i < 2; i++) {
@@ -1448,13 +1461,27 @@ void Tracing() {
 	err = cudaMemcpy(d_tetrahedralLinks, tetrahedralLinks, sizeof(int) * globalNumOfCells * 4, cudaMemcpyHostToDevice);
 	if (err) lcs::Error("Fail to fill d_tetrahedralLinks");
 
+	// Initialize globalStartTime and globalFinishTime
+	if (configure->GetNumOfTimePoints() != 0) {
+		globalStartTime = 0.0;
+		globalFinishTime = (configure->GetNumOfTimePoints() - 1) * configure->GetTimeInterval();
+	} else {
+		globalStartTime = configure->GetStartTime();
+		globalFinishTime = configure->GetFinishTime();
+	}
+
 	// Initialize initial active particle data
 	InitializeInitialActiveParticles();
 
 	// Initialize velocity data
+	int firstVelocityFrame = static_cast<int>(globalStartTime / configure->GetTimeInterval());
+	if (firstVelocityFrame >= configure->GetNumOfFrames() - 1) {
+		lcs::Error("startTime should within the cycle");
+	}
+	
 	double *velocities[2];
 	int currStartVIndex = 1;
-	InitializeVelocityData(velocities);
+	InitializeVelocityData(velocities, firstVelocityFrame);
 
 	// Create some dynamic device arrays
 	err = cudaMalloc(&d_exclusiveScanArrayForInt, sizeof(int) * std::max(numOfInterestingBlocks, numOfInitialActiveParticles));
@@ -1502,8 +1529,8 @@ void Tracing() {
 
 	// Some start setting
 	currActiveParticleArray = 0;
-	double currTime = 0;
-	double interval = configure->GetTimeInterval();
+	double currTime = globalStartTime;
+	// double interval = configure->GetTimeInterval();
 	
 #ifdef TET_WALK_STAT
 	err = cudaMalloc(&d_numOfTetWalks, sizeof(int) * numOfInitialActiveParticles);
@@ -1520,7 +1547,7 @@ void Tracing() {
 				d_kForRK4, d_nxForRK4, /*d_k2ForRK4, d_k3ForRK4,*/ d_pastTimes, d_placesOfInterest,
 				d_startOffsetInParticles, d_blockedActiveParticles, d_localTetIDs, d_exitCells, configure->GetTimeStep(), configure->GetEpsilon(),
 				// finalTime
-				(configure->GetNumOfTimePoints() - 1) * configure->GetTimeInterval()
+				globalFinishTime, configure->GetTimeInterval()
 
 #ifdef TET_WALK_STAT
 				, d_numOfTetWalks
@@ -1532,7 +1559,7 @@ void Tracing() {
 	/// DEBUG ///
 	//int startTime = clock();
 
-	numOfTimePoints = configure->GetNumOfTimePoints();
+	// numOfTimePoints = configure->GetNumOfTimePoints();
 	double startTime = lcs::GetCurrentTimeInSeconds();
 
 	/// DEBUG ///
@@ -1551,7 +1578,18 @@ void Tracing() {
 	int *startOffsetInActiveParticles = new int [numOfInitialActiveParticles];
 	int *histogram = new int [upperBound + 1];
 #endif
-	for (int frameIdx = 0; frameIdx + 1 < numOfTimePoints; frameIdx++, currTime += interval) {
+
+	// for (int frameIdx = 0; frameIdx + 1 < numOfTimePoints; frameIdx++, currTime += interval) {
+	double interval;
+	double start_of_interval = firstVelocityFrame * configure->GetTimeInterval();
+	double end_of_interval;
+	for (int frameIdx = firstVelocityFrame; currTime < globalFinishTime; frameIdx++, start_of_interval += configure->GetTimeInterval(), currTime = end_of_interval) {
+		end_of_interval = start_of_interval + configure->GetTimeInterval();
+
+		if (frameIdx == numOfFrames - 1) {
+			frameIdx = 0;
+		}
+
 #ifdef BLOCK_STAT
 		if (frameIdx) {
 			fprintf(blockStatFile1, "\n");
@@ -1565,7 +1603,7 @@ void Tracing() {
 		GetLastPositions(fileName, currTime);
 #endif
 
-		printf("*********Tracing between time point %d and time point %d*********\n", frameIdx, frameIdx + 1);
+		printf("*********Tracing between time point %d and time point %d (%lf to %lf)*********\n", frameIdx, frameIdx + 1, start_of_interval, end_of_interval);
 		printf("\n");
 
 		/// DEBUG ///
@@ -1642,7 +1680,7 @@ void Tracing() {
 
 			int numOfWorkGroups = AssignWorkGroups(numOfActiveBlocks, tracingBlockSize, multiple);
 
-			LaunchBlockedTracingKernel(numOfWorkGroups, currTime, currTime + interval, tracingBlockSize, tracingSharedMemorySize, multiple);
+			LaunchBlockedTracingKernel(numOfWorkGroups, start_of_interval, std::min(end_of_interval, globalFinishTime), tracingBlockSize, tracingSharedMemorySize, multiple);
 		}
 
 		int endTime = clock();
@@ -1716,8 +1754,8 @@ void GetLastPositions(const char *fileName, double t = 0.0) {
 #ifdef GET_PATH
 		//fprintf(fout, "v");
 #else
-		// fprintf(fout, "%d %d %d:", x, y, z);
-		fprintf(fout, "v ");
+		fprintf(fout, "%d %d %d:", x, y, z);
+		// fprintf(fout, "v ");
 #endif
 
 		for (int j = 0; j < 3; j++)
@@ -1911,7 +1949,7 @@ void CalculateFTLE() {
 
 				// printf("%d %d %d %lf\n", x, y, z, eigenvalues[0]);
 
-				double new_value = ftle[GetIndex(x, y, z, yRes, zRes)] = log(sqrt(eigenvalues[0])) / ((configure->GetNumOfTimePoints() - 1) * configure->GetTimeInterval());
+				double new_value = ftle[GetIndex(x, y, z, yRes, zRes)] = log(sqrt(eigenvalues[0])) / (globalFinishTime - globalStartTime);
 
 				if (new_value > max_ftle) max_ftle = new_value;
 				if (new_value < min_ftle) min_ftle = new_value;
