@@ -9,6 +9,7 @@ Last Update		:		May 20th, 2012
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
+#include <limits>
 #include <vtkIdList.h>
 #include <vtkPointData.h>
 
@@ -120,13 +121,25 @@ TetrahedralGrid::TetrahedralGrid(vtkUnstructuredGrid *unstructuredGrid) {
 	this->tetrahedralConnectivities = new int [this->numOfCells * 4];
 	this->tetrahedralLinks = new int [this->numOfCells * 4];
 
+	double min_vel = std::numeric_limits<double>::max(), max_vel = 0.0;
+
 	double point[3], velocity[3];
 	for (int i = 0; i < this->numOfVertices; i++) {
 		unstructuredGrid->GetPoint(i, point);
 		this->vertices[i] = Vector(point);
 		unstructuredGrid->GetPointData()->GetVectors()->GetTuple(i, velocity);
 		this->velocities[i] = Vector(velocity);
+
+		double vel = this->velocities[i].Length();
+		if (vel < min_vel) {
+			min_vel = vel;
+		}
+		if (vel > max_vel) {
+			max_vel = vel;
+		}
 	}
+
+	printf("(min_vel: %lf, max_vel: %lf) ", min_vel, max_vel);
 
 	int **vertexLinks = new int *[this->numOfVertices];
 	int *vertexDegrees = new int [this->numOfVertices];

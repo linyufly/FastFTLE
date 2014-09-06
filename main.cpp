@@ -104,6 +104,7 @@ extern "C" void BigBlockInitializationForVelocities(double *globalStartVelocitie
 //const char *configurationFile = "RungeKutta4ForTCPC.conf";
 //const char *configurationFile = "RungeKutta4ForUpperVasc.conf";
 //const char *configurationFile = "RungeKutta4ForAR2.conf";
+//const char *configurationFile = "RungeKutta4ForPatient2.conf";
 const char *configurationFile = "RungeKutta4ForPatient96.conf";
 //const char *configurationFile = "RungeKutta4ForDoubleGyre3D.conf";
 const char *lastPositionFile = "lcsLastPositions.txt";
@@ -2059,7 +2060,7 @@ int main() {
 	GetLastPositions(lastPositionFile);
 
 	// Calucate FTLE values
-	CalculateFTLE();
+	// CalculateFTLE();
 
 	return 0;
 }
